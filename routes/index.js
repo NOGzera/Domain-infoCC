@@ -1,94 +1,261 @@
 var express = require('express');
+var bodyParser = require('body-parser')
 var router = express.Router();
-var request=require('request')
-var probe = require('pmx').probe();
-var postmetric=0;
-var getmetric=0;
+const Connection = require('tedious').Connection;
+const Request = require('tedious').Request;
+const msRestAzure = require('ms-rest-azure');
+const SearchManagement = require('azure-arm-search');
+let https = require('https');
 
-var imgsrc="";
-/* GET home page. */
-var metric1 = probe.metric({
-    name    : 'GET Metric',
-    value   : function() {
-        return   getmetric;
+let subscriptionKey = 'a47f6e92fc3a4e00ba878e629bfba840';
+let host = 'api.cognitive.microsoft.com';
+let path = '/bing/v7.0/search';
+
+let term = 'ceapa cu cartofi';
+
+function spellCheck(res,parameter){
+    console.log("spellcheck");
+    let host = 'api.cognitive.microsoft.com';
+    let pathsp = '/bing/v7.0/spellcheck';
+
+    let key = 'a47f6e92fc3a4e00ba878e629bfba840';
+
+    let mkt = "en-US";
+    let mode = "proof";
+    let text = parameter;
+    let query_string = "?mkt=" + mkt + "&mode=" + mode;
+
+    let request_params = {
+        method : 'POST',
+        hostname : host,
+        path : pathsp + query_string,
+        headers : {
+            'Content-Type' : 'application/x-www-form-urlencoded',
+            'Content-Length' : text.length + 5,
+            'Ocp-Apim-Subscription-Key' : key,
+//        'X-Search-Location' : CLIENT_LOCATION,
+//        'X-MSEdge-ClientID' : CLIENT_ID,
+//        'X-MSEdge-ClientIP' : CLIENT_ID,
+        }
+    };
+    let paramdata="";
+    let response_handler = function (response) {
+
+        let body = '';
+        response.on ('data', function (d) {
+            body += d;
+        });
+        response.on ('end', function () {
+            let body_ = JSON.parse (body);
+            let body__ = JSON.stringify (body_, null, '  ');
+            let data=body_["flaggedTokens"];
+
+            for (let i in data){
+                let y=data[i];
+                parameter=parameter.replace(String(y.token),String(y.suggestions[0].suggestion));
+            }
+
+        });
+        response.on ('error', function (e) {
+            console.log ('Error: ' + e.message);
+        });
+
+    };
+    setTimeout(function(){
+        database_query(res,parameter);
+    }, 3000);
+    let req = https.request (request_params, response_handler);
+    req.write ("text=" + text);
+    req.end ();
+}
+function keyWords(res,parameter){
+    console.log("keywords");
+    let accessKey = 'd9586edd1f974fb9b37ae22add5a0f23';
+
+    let uri = 'westcentralus.api.cognitive.microsoft.com';
+    let patha = '/text/analytics/v2.0/keyPhrases';
+
+    let response_handler = function (response) {
+        let body = '';
+        response.on ('data', function (d) {
+            body += d;
+        });
+        response.on ('end', function () {
+            let body_ = JSON.parse (body);
+            let body__ = JSON.stringify (body_, null, '  ');
+            let data=body_["documents"];
+
+            for (let i in data){
+                var data1=data[i]["keyPhrases"];
+                let result="";
+                for (let x in data1 )
+                {
+                    result+=data1[x]+" ";
+                }
+                web_search(res,result);
+            }
+
+        });
+        response.on ('error', function (e) {
+            console.log ('Error: ' + e.message);
+        });
+    };
+
+    let get_key_phrases = function (documents) {
+        let body = JSON.stringify (documents);
+
+        let request_params = {
+            method : 'POST',
+            hostname : uri,
+            path : patha,
+            headers : {
+                'Ocp-Apim-Subscription-Key' : accessKey,
+            }
+        };
+
+        let req = https.request (request_params, response_handler);
+        req.write (body);
+        req.end ();
     }
-});
-var metric2 = probe.metric({
-    name    : 'POST Metric',
-    value   : function() {
-        return postmetric;
+
+    let documents = { 'documents': [
+            { 'id': '1', 'language': 'en', 'text': parameter }
+        ]};
+
+    get_key_phrases (documents);
+}
+let a=[];
+function web_search(res, param){
+    console.log("web_search");
+    while(a.length > 0) {
+        a.pop();
     }
-});
-router.get('/', function(req, res, next) {
-    getmetric=getmetric+1;
-  res.render('index', { title: 'Domain stats', condition: false, anyArray: [1,2,3] });
-});
-router.get('/test/:domain/:ip/:city/:country/:isp/:org', function(req, res,next){
-    getmetric=getmetric+1;
-  res.render('test',{output1:req.params.domain,output2:req.params.ip,output3:imgsrc,output4:req.params.city,output5:req.params.country,output6:req.params.isp,output7:req.params.org});
-});
-router.post('/test/submit',function(req,res,next){
-  var id=req.body.id;
-  postmetric=postmetric+1;
+    a.push(param);
+    let response_handler = function (response) {
+        let body = '';
+        response.on('data', function (d) {
+            body += d;
+        });
+        response.on('end', function () {
+            console.log('\nRelevant Headers:\n');
+            for (var header in response.headers)
+                // header keys are lower-cased by Node.js
+                if (header.startsWith("bingapis-") || header.startsWith("x-msedge-"))
+                    console.log(header + ": " + response.headers[header]);
+            let body_ = JSON.parse (body);
+            let body__ = JSON.stringify (body_, null, '  ');
 
-  var url1='https://www.validator.pizza/email/'+id;
-  var url2='http://ip-api.com/json/www.';
-  request(url1, function (error, response, body) {
-      var param1='';
-      var param2='';
-      var param3='';
-      var param4='';
-      var param5='';
-      var param6='';
-        if (!error && response.statusCode == 200) {
-            var obj1 = JSON.parse(body);
-            param1=obj1.domain;
-            request(url2+param1, function (error, response, body) {
-                if (!error && response.statusCode == 200) {
-                    var obj2 = JSON.parse(body);
-                    if(obj2.query)
-                        param2=obj2.query;
-                    else
-                        param2='Not defined';
+            let data=body_["webPages"];
+            let data1=data["value"]
+            let prevs="1"
+            for (let x in data1){
+                let y= data1[x];
+                for (let u in y)
+                {
+                    if (prevs !== y["url"])
+                    {
+                    let push_string="<a href="+y["url"]+">"+y["snippet"]+"</a>";
+                        a.push(push_string);
 
-                    if (obj2.city)
-                        param3=obj2.city;
-                    else
-                        param3='Not defined';
+                    }
+                    prevs=y["url"];
+                }
+            }
+            res.render('details',{dataArray:a})
 
-                    if (obj2.country)
-                        param4=obj2.country;
-                    else
-                        param4='Not defined';
+        });
+        response.on('error', function (e) {
+            console.log('Error: ' + e.message);
+        });
+    };
 
-                    if(obj2.isp)
-                        param5=obj2.isp;
-                    else
-                        param5='Not defined';
+    let bing_web_search = function (search) {
+        console.log('Searching the Web for: ' + param);
+        let request_params = {
+            method : 'GET',
+            hostname : host,
+            path : path + '?q=' + encodeURIComponent(search),
+            headers : {
+                'Ocp-Apim-Subscription-Key' : subscriptionKey,
+            }
+        };
 
-                    if(obj2.org)
-                        param6=obj2.org;
-                    else
-                        param6='Not defined';
+        let req = https.request(request_params, response_handler);
+        req.end();
+    }
 
-                    request('http://api.whoapi.com/?apikey=3675648e62d4bd55cf176e2f3c95969c&r=screenshot&domain='+param2+'&process=thumb&resolution=1366x768&delay=&thumbwidth=&thumbheight=', function (error, response, body) {
-                        if (!error && response.statusCode == 200) {
-                            var obj3 = JSON.parse(body);
-                            imgsrc=obj3.full_size;
-                            res.redirect('/test/'+ param1+'/'+param2+'/'+param3+'/'+param4+'/'+param5+'/'+param6);
-                        }
-                    });
-                }else{
-                imgsrc='/images/error400Badrequest.jpg';
-                res.redirect('/test/Error wrong domain/Error wrong domain/Error wrong domain/Error wrong domain/Error wrong domain/Error wrong domain');}
-            });
-        }else
-        {imgsrc='/images/error400Badrequest.jpg';
-      res.redirect('/test/Error wrong mail format/Error wrong mail format/Error wrong mail format/Error wrong mail format/Error wrong mail format/Error wrong mail format');}
+    if (subscriptionKey.length === 32) {
+        bing_web_search(param);
+    } else {
+        console.log('Invalid Bing Search API subscription key!');
+        console.log('Please paste yours into the source code.');
+    }
+
+}
+function database_query(res,parameter){
+    console.log("database");
+    const connection = new Connection(config);
+    connection.on('connect', err => {
+        err ? console.log(err) : executeStatement();
     });
 
 
+    const query = 'select description from SalesLT.ProductDescription where lower(description) like \'%'+parameter+'%\'';
+    const executeStatement = () => {
+        const request = new Request(query, (err, rowCount) => {
+            err ? console.log(err) : console.log(rowCount);
+        });
 
+        request.on('row', columns => {
+            var result="";
+            columns.forEach(function (column) {
+
+                    result+=column.value+" ";
+
+                }
+            )
+
+            arr.push(result);
+        });
+
+        connection.execSql(request);
+    };
+    setTimeout(function(){
+        if (arr.length>0)
+            res.render('data', { title: 'User Comments', dataArray : arr });
+        else
+            res.render('data', { title: 'No product description for '+parameter+', search in web', dataArray : [parameter] });
+    }, 5000);
+}
+var arr=[];
+const config = {
+    userName: 'Sefu',
+    password: 'Sef963852741',
+    server: 'hellowordl1122.database.windows.net',
+    options: {
+        database: 'helloworld',
+        encrypt: true
+    }
+};
+
+
+router.get('/',function (req,res,next) {
+    res.render('index', { title: 'Search in comments' });
+});
+
+
+router.post('/data', function(req, res, next) {
+    while(arr.length > 0) {
+        arr.pop();
+    }
+    spellCheck(res,req.body.name);
 
 });
+
+
+router.post('/details',function (req,res,next) {
+    keyWords(res,req.body.object)
+});
+
+
 module.exports = router;
